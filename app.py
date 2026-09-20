@@ -273,30 +273,11 @@ def messages():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
+# ==================== ЛИЧНЫЕ СООБЩЕНИЯ (БЕЗ ПОДДЕРЖКИ) ====================
 @app.route('/dm/<user1>/<user2>', methods=['GET', 'POST'])
 def dm_chat(user1, user2):
     u1 = user1.lower()
     u2 = user2.lower()
-    owner = OWNER_LOGIN.lower()
-
-    if u1 == owner or u2 == owner:
-        user = u2 if u1 == owner else u1
-        filepath = os.path.join(SUPPORT_DIR, f'{user}.txt')
-
-        if request.method == 'POST':
-            data = request.get_data(as_text=True).strip()
-            if data:
-                now = now_msk()
-                with open(filepath, 'a') as f:
-                    f.write(data + '|' + now + '\n')
-                return 'OK', 200
-            return 'Empty', 400
-        else:
-            if not os.path.exists(filepath):
-                return '', 200
-            with open(filepath, 'r') as f:
-                content = f.read()
-            return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     CHATS_DIR = '/tmp/chats'
     if not os.path.exists(CHATS_DIR):
@@ -311,6 +292,27 @@ def dm_chat(user1, user2):
                 f.write(data + '|' + now + '\n')
             add_to_chat_list(user1, user2)
             add_to_chat_list(user2, user1)
+            return 'OK', 200
+        return 'Empty', 400
+    else:
+        if not os.path.exists(filepath):
+            return '', 200
+        with open(filepath, 'r') as f:
+            content = f.read()
+        return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+# ==================== ПОДДЕРЖКА ====================
+@app.route('/support/<client>', methods=['GET', 'POST'])
+def support_chat(client):
+    client = client.lower()
+    filepath = os.path.join(SUPPORT_DIR, f'{client}.txt')
+
+    if request.method == 'POST':
+        data = request.get_data(as_text=True).strip()
+        if data:
+            now = now_msk()
+            with open(filepath, 'a') as f:
+                f.write(data + '|' + now + '\n')
             return 'OK', 200
         return 'Empty', 400
     else:
@@ -413,6 +415,7 @@ def support_unread_all(viewer):
 
     return jsonify(result), 200
 
+# ==================== ADMIN CHAT ====================
 @app.route('/admin_chat.txt', methods=['GET', 'POST'])
 def admin_chat():
     FILE = '/tmp/admin_chat.txt'
@@ -432,6 +435,7 @@ def admin_chat():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
+# ==================== УДАЛЕНИЕ ====================
 @app.route('/delete_message', methods=['POST'])
 def delete_message():
     data = request.get_json()
@@ -465,6 +469,7 @@ def delete_message():
         f.writelines(new_lines)
     return jsonify({'status': 'OK'}), 200
 
+# ==================== READ / ONLINE / TYPING ====================
 @app.route('/read/<chat_id>/<user>', methods=['GET', 'POST'])
 def read_status(chat_id, user):
     filepath = os.path.join(READ_DIR, f"{chat_id}_{user}.txt")
@@ -504,6 +509,7 @@ def typing_status(chat_id, user):
         with open(filepath, 'r') as f:
             return f.read(), 200
 
+# ==================== РЕАКЦИИ ====================
 @app.route('/reaction', methods=['POST'])
 def reaction_toggle():
     data = request.get_json() or {}
@@ -610,7 +616,6 @@ def upload_video():
     return jsonify({'status': 'OK',
                     'url': f'https://nemesendger-server.onrender.com/video/{filename}'}), 200
 
-# ==================== ДОКУМЕНТЫ ====================
 @app.route('/document/<filename>', methods=['GET'])
 def get_document(filename):
     filepath = os.path.join(DOCS_DIR, filename)
