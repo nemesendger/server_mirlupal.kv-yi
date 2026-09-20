@@ -22,13 +22,14 @@ AVATARS_DIR = '/tmp/avatars'
 VOICE_DIR = '/tmp/voice'
 PHOTOS_DIR = '/tmp/photos'
 VIDEO_DIR = '/tmp/video'
+DOCS_DIR = '/tmp/docs'
 READ_DIR = '/tmp/read'
 ONLINE_DIR = '/tmp/online'
 TYPING_DIR = '/tmp/typing'
 REACTIONS_DIR = '/tmp/reactions'
 SUPPORT_DIR = '/tmp/support'
 
-for d in [AVATARS_DIR, VOICE_DIR, PHOTOS_DIR, VIDEO_DIR, READ_DIR, ONLINE_DIR, TYPING_DIR, REACTIONS_DIR, SUPPORT_DIR]:
+for d in [AVATARS_DIR, VOICE_DIR, PHOTOS_DIR, VIDEO_DIR, DOCS_DIR, READ_DIR, ONLINE_DIR, TYPING_DIR, REACTIONS_DIR, SUPPORT_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
@@ -76,7 +77,6 @@ def add_to_chat_list(owner, other):
         with open(chats_file, 'w') as f:
             json.dump(chats, f)
 
-# ==================== АККАУНТ ПОДДЕРЖКИ ====================
 def ensure_support_account():
     users = load_users()
     if OWNER_LOGIN not in users:
@@ -273,14 +273,12 @@ def messages():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-# ==================== ЛИЧНЫЕ СООБЩЕНИЯ + ПОДДЕРЖКА ====================
 @app.route('/dm/<user1>/<user2>', methods=['GET', 'POST'])
 def dm_chat(user1, user2):
     u1 = user1.lower()
     u2 = user2.lower()
     owner = OWNER_LOGIN.lower()
 
-    # === ПОДДЕРЖКА ===
     if u1 == owner or u2 == owner:
         user = u2 if u1 == owner else u1
         filepath = os.path.join(SUPPORT_DIR, f'{user}.txt')
@@ -300,7 +298,6 @@ def dm_chat(user1, user2):
                 content = f.read()
             return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    # === ОБЫЧНЫЙ ЧАТ ===
     CHATS_DIR = '/tmp/chats'
     if not os.path.exists(CHATS_DIR):
         os.makedirs(CHATS_DIR)
@@ -323,7 +320,6 @@ def dm_chat(user1, user2):
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-# ==================== СПИСОК ЖАЛОБ ====================
 @app.route('/support_list', methods=['GET'])
 def support_list():
     if not os.path.exists(SUPPORT_DIR):
@@ -334,7 +330,6 @@ def support_list():
             users.append(fname[:-4])
     return jsonify(users), 200
 
-# ==================== ПОДДЕРЖКА: НЕПРОЧИТАННЫЕ ====================
 @app.route('/support_unread/<client>/<viewer>', methods=['GET'])
 def support_unread_one(client, viewer):
     client = client.lower()
@@ -418,7 +413,6 @@ def support_unread_all(viewer):
 
     return jsonify(result), 200
 
-# ==================== ADMIN CHAT ====================
 @app.route('/admin_chat.txt', methods=['GET', 'POST'])
 def admin_chat():
     FILE = '/tmp/admin_chat.txt'
@@ -438,7 +432,6 @@ def admin_chat():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-# ==================== УДАЛЕНИЕ ====================
 @app.route('/delete_message', methods=['POST'])
 def delete_message():
     data = request.get_json()
@@ -472,7 +465,6 @@ def delete_message():
         f.writelines(new_lines)
     return jsonify({'status': 'OK'}), 200
 
-# ==================== READ / ONLINE / TYPING ====================
 @app.route('/read/<chat_id>/<user>', methods=['GET', 'POST'])
 def read_status(chat_id, user):
     filepath = os.path.join(READ_DIR, f"{chat_id}_{user}.txt")
@@ -512,7 +504,6 @@ def typing_status(chat_id, user):
         with open(filepath, 'r') as f:
             return f.read(), 200
 
-# ==================== РЕАКЦИИ ====================
 @app.route('/reaction', methods=['POST'])
 def reaction_toggle():
     data = request.get_json() or {}
@@ -618,6 +609,27 @@ def upload_video():
     file.save(filepath)
     return jsonify({'status': 'OK',
                     'url': f'https://nemesendger-server.onrender.com/video/{filename}'}), 200
+
+# ==================== ДОКУМЕНТЫ ====================
+@app.route('/document/<filename>', methods=['GET'])
+def get_document(filename):
+    filepath = os.path.join(DOCS_DIR, filename)
+    if not os.path.exists(filepath):
+        return '', 404
+    return send_file(filepath, as_attachment=True)
+
+@app.route('/document', methods=['POST'])
+def upload_document():
+    if 'document' not in request.files:
+        return jsonify({'error': 'No document'}), 400
+    file = request.files['document']
+    original_name = file.filename or 'file'
+    filename = f"{datetime.datetime.now(MSK).strftime('%Y%m%d_%H%M%S')}_{original_name}"
+    filepath = os.path.join(DOCS_DIR, filename)
+    file.save(filepath)
+    return jsonify({'status': 'OK',
+                    'url': f'https://nemesendger-server.onrender.com/document/{filename}',
+                    'name': original_name}), 200
 
 # ==================== АДМИН ====================
 @app.route('/delete_user', methods=['POST'])
