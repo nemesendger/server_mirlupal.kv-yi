@@ -3,6 +3,8 @@ import os
 import json
 import base64
 import datetime
+import time
+import threading
 
 app = Flask(__name__)
 
@@ -33,6 +35,28 @@ for d in [AVATARS_DIR, VOICE_DIR, PHOTOS_DIR, VIDEO_DIR, DOCS_DIR, READ_DIR, ONL
     if not os.path.exists(d):
         os.makedirs(d)
 
+# ==================== LONG POLL ХРАНИЛИЩЕ ====================
+POLL_EVENTS = {}
+POLL_LOCK = threading.Lock()
+
+def notify_user(login, event_type='message', chat_id=''):
+    """Будит long-poll у пользователя."""
+    if not login:
+        return
+    login = login.lower()
+    ev = {
+        'id': str(int(time.time() * 1000)),
+        'type': event_type,
+        'chat_id': chat_id,
+        'time': now_msk()
+    }
+    with POLL_LOCK:
+        if login not in POLL_EVENTS:
+            POLL_EVENTS[login] = []
+        POLL_EVENTS[login].append(ev)
+        POLL_EVENTS[login] = POLL_EVENTS[login][-10:]
+
+# ==================== ХЕЛПЕРЫ ====================
 def load_users():
     if not os.path.exists(USERS_FILE):
         return {}
@@ -107,6 +131,29 @@ def save_reactions(chat_id, data):
     path = reactions_file(chat_id)
     with open(path, 'w') as f:
         json.dump(data, f)
+
+# ==================== LONG POLL ====================
+@app.route('/longpoll/<login>', methods=['GET'])
+def longpoll(login):
+    login = login.lower()
+    since = request.args.get('since', '')
+    start_time = time.time()
+    timeout = 25
+
+    with POLL_LOCK:
+        if login not in POLL_EVENTS:
+            POLL_EVENTS[login] = []
+
+    while time.time() - start_time < timeout:
+        with POLL_LOCK:
+            events = POLL_EVENTS.get(login, [])
+            for ev in events:
+                if ev.get('id', '') > since:
+                    POLL_EVENTS[login] = [ev]
+                    return jsonify({'has_update': True, 'event': ev}), 200
+        time.sleep(0.5)
+
+    return jsonify({'has_update': False}), 200
 
 # ==================== РЕГИСТРАЦИЯ ====================
 @app.route('/register', methods=['POST'])
@@ -254,18 +301,28 @@ def get_unread(login):
         result[recipient] = count
     return jsonify(result), 200
 
+# ==================== ОБЩИЙ ЧАТ ====================
 @app.route('/messages.txt', methods=['GET', 'POST'])
 def messages():
     MESSAGES_FILE = '/tmp/messages.txt'
     if not os.path.exists(MESSAGES_FILE):
         with open(MESSAGES_FILE, 'w') as f:
             f.write('')
+
     if request.method == 'POST':
         data = request.get_data(as_text=True).strip()
         if data:
             now = now_msk()
             with open(MESSAGES_FILE, 'a') as f:
                 f.write(data + '|' + now + '\n')
+
+            if ':' in data:
+                sender = data.split(':', 1)[0].strip().lower()
+                users = load_users()
+                for u in users.keys():
+                    if u != sender:
+                        notify_user(u, 'message', 'global')
+
             return 'OK', 200
         return 'Empty', 400
     else:
@@ -273,7 +330,7 @@ def messages():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-# ==================== ЛИЧНЫЕ СООБЩЕНИЯ (БЕЗ ПОДДЕРЖКИ) ====================
+# ==================== ЛИЧНЫЕ СООБЩЕНИЯ ====================
 @app.route('/dm/<user1>/<user2>', methods=['GET', 'POST'])
 def dm_chat(user1, user2):
     u1 = user1.lower()
@@ -284,6 +341,7 @@ def dm_chat(user1, user2):
         os.makedirs(CHATS_DIR)
     key = '_'.join(sorted([u1, u2]))
     filepath = os.path.join(CHATS_DIR, f"{key}.txt")
+
     if request.method == 'POST':
         data = request.get_data(as_text=True).strip()
         if data:
@@ -292,6 +350,12 @@ def dm_chat(user1, user2):
                 f.write(data + '|' + now + '\n')
             add_to_chat_list(user1, user2)
             add_to_chat_list(user2, user1)
+
+            if ':' in data:
+                sender = data.split(':', 1)[0].strip().lower()
+                recipient = u2 if sender == u1 else u1
+                notify_user(recipient, 'message', recipient)
+
             return 'OK', 200
         return 'Empty', 400
     else:
@@ -313,6 +377,14 @@ def support_chat(client):
             now = now_msk()
             with open(filepath, 'a') as f:
                 f.write(data + '|' + now + '\n')
+
+            if ':' in data:
+                sender = data.split(':', 1)[0].strip().lower()
+                if sender == client:
+                    notify_user(OWNER_LOGIN, 'message', client)
+                else:
+                    notify_user(client, 'message', OWNER_LOGIN)
+
             return 'OK', 200
         return 'Empty', 400
     else:
@@ -422,6 +494,7 @@ def admin_chat():
     if not os.path.exists(FILE):
         with open(FILE, 'w') as f:
             f.write('')
+
     if request.method == 'POST':
         data = request.get_data(as_text=True).strip()
         if data:
@@ -752,4 +825,5 @@ def admin_clear_global():
     return jsonify({'status': 'OK'}), 200
 
 if __name__ == '__main__':
-    app.run()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
