@@ -83,7 +83,8 @@ def ensure_support_account():
     if OWNER_LOGIN not in users:
         users[OWNER_LOGIN] = {
             'password': ADMIN_PASSWORD,
-            'displayName': 'Техподдержка'
+            'displayName': 'Техподдержка',
+            'devices': []
         }
         save_users(users)
 
@@ -91,7 +92,6 @@ ensure_support_account()
 
 # ==================== ЛОГИРОВАНИЕ ВХОДОВ ====================
 def log_security_event(login, device='', device_id='', platform='', ip=''):
-    """Записывает событие входа в файл безопасности пользователя."""
     login = login.lower()
     filepath = os.path.join(SECURITY_DIR, f'{login}.txt')
     devices_file = os.path.join(SECURITY_DIR, f'{login}_devices.json')
@@ -164,6 +164,7 @@ def register():
     login = data.get('login')
     password = data.get('password')
     display_name = data.get('displayName')
+    device_id = data.get('device_id', '')
 
     if not login or not password:
         return jsonify({'error': 'Логин и пароль обязательны'}), 400
@@ -178,11 +179,14 @@ def register():
     if login in users:
         return jsonify({'error': 'Пользователь уже существует'}), 400
 
-    users[login] = {'password': password, 'displayName': display_name or login}
+    users[login] = {
+        'password': password,
+        'displayName': display_name or login,
+        'devices': [device_id] if device_id else []
+    }
     save_users(users)
 
     device = data.get('device', '')
-    device_id = data.get('device_id', '')
     platform = data.get('platform', '')
     ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
     if ip:
@@ -194,6 +198,7 @@ def register():
 
     return jsonify({'status': 'OK'}), 200
 
+# ==================== ЛОГИН ====================
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -214,6 +219,13 @@ def login():
     if users[login]['password'] != password:
         return jsonify({'error': 'Неверный пароль'}), 401
 
+    # Регистрируем это устройство в списке активных
+    if 'devices' not in users[login]:
+        users[login]['devices'] = []
+    if device_id and device_id not in users[login]['devices']:
+        users[login]['devices'].append(device_id)
+    save_users(users)
+
     ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
     if ip:
         ip = ip.split(',')[0].strip()
@@ -227,6 +239,17 @@ def login():
         'displayName': users[login].get('displayName', login)
     }), 200
 
+# ==================== ПРОВЕРКА СЕССИИ ====================
+@app.route('/check_session/<login>/<device_id>', methods=['GET'])
+def check_session(login, device_id):
+    users = load_users()
+    if login not in users:
+        return jsonify({'error': 'Пользователь не найден'}), 404
+    devices = users[login].get('devices', [])
+    if device_id not in devices:
+        return jsonify({'error': 'Сессия завершена'}), 401
+    return jsonify({'status': 'OK'}), 200
+
 # ==================== СМЕНА ПАРОЛЯ ====================
 @app.route('/change_password', methods=['POST'])
 def change_password():
@@ -234,6 +257,7 @@ def change_password():
     login = data.get('login')
     old_password = data.get('old_password')
     new_password = data.get('new_password')
+    device_id = data.get('device_id', '')
 
     if not login or not old_password or not new_password:
         return jsonify({'error': 'Все поля обязательны'}), 400
@@ -247,21 +271,16 @@ def change_password():
         return jsonify({'error': 'Старый пароль неверный'}), 401
 
     users[login]['password'] = new_password
+
+    # === ГЛАВНОЕ: сбрасываем все сессии кроме текущего устройства ===
+    users[login]['devices'] = [device_id] if device_id else []
     save_users(users)
+
     return jsonify({'status': 'OK'}), 200
 
-# ==================== СБРОС ПАРОЛЯ (ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА) ====================
+# ==================== СБРОС ПАРОЛЯ ====================
 @app.route('/force_reset', methods=['POST'])
 def force_reset_password():
-    """
-    Принудительный сброс пароля. Требует secret_key = ADMIN_PASSWORD.
-    Пример запроса:
-    {
-        "login": "my_login",
-        "new_password": "NewPass123",
-        "secret_key": "1230908070605gg"
-    }
-    """
     data = request.get_json() or {}
     login = data.get('login')
     new_password = data.get('new_password')
@@ -277,6 +296,7 @@ def force_reset_password():
         return jsonify({'error': 'Пользователь не найден'}), 404
 
     users[login]['password'] = new_password
+    users[login]['devices'] = []
     save_users(users)
     return jsonify({'status': 'OK', 'message': f'Пароль для {login} изменён'}), 200
 
