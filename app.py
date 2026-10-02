@@ -88,6 +88,7 @@ def ensure_support_account():
 
 ensure_support_account()
 
+# ==================== РЕАКЦИИ ====================
 def reactions_file(chat_id):
     safe = chat_id.replace('/', '_').replace('\\', '_')
     return os.path.join(REACTIONS_DIR, f'{safe}.json')
@@ -253,6 +254,7 @@ def get_unread(login):
         result[recipient] = count
     return jsonify(result), 200
 
+# ==================== ОБЩИЙ ЧАТ ====================
 @app.route('/messages.txt', methods=['GET', 'POST'])
 def messages():
     MESSAGES_FILE = '/tmp/messages.txt'
@@ -272,6 +274,7 @@ def messages():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
+# ==================== ЛИЧНЫЕ СООБЩЕНИЯ ====================
 @app.route('/dm/<user1>/<user2>', methods=['GET', 'POST'])
 def dm_chat(user1, user2):
     u1 = user1.lower()
@@ -299,6 +302,7 @@ def dm_chat(user1, user2):
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
+# ==================== ПОДДЕРЖКА ====================
 @app.route('/support/<client>', methods=['GET', 'POST'])
 def support_chat(client):
     client = client.lower()
@@ -412,6 +416,7 @@ def support_unread_all(viewer):
 
     return jsonify(result), 200
 
+# ==================== ADMIN CHAT ====================
 @app.route('/admin_chat.txt', methods=['GET', 'POST'])
 def admin_chat():
     FILE = '/tmp/admin_chat.txt'
@@ -431,6 +436,7 @@ def admin_chat():
             content = f.read()
         return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
+# ==================== УДАЛЕНИЕ ====================
 @app.route('/delete_message', methods=['POST'])
 def delete_message():
     data = request.get_json()
@@ -464,6 +470,7 @@ def delete_message():
         f.writelines(new_lines)
     return jsonify({'status': 'OK'}), 200
 
+# ==================== READ / ONLINE ====================
 @app.route('/read/<chat_id>/<user>', methods=['GET', 'POST'])
 def read_status(chat_id, user):
     filepath = os.path.join(READ_DIR, f"{chat_id}_{user}.txt")
@@ -490,13 +497,13 @@ def online_status(user):
         with open(filepath, 'r') as f:
             return f.read(), 200
 
-# ==================== ТИПИНГ (с логированием) ====================
+# ==================== ТИПИНГ ====================
 @app.route('/typing/<chat_id>/<user>', methods=['GET', 'POST'])
 def typing_status(chat_id, user):
     filepath = os.path.join(TYPING_DIR, f"{chat_id}_{user}.txt")
     if request.method == 'POST':
+        # Клиент присылает "1" (печатает) или "0" (не печатает)
         data = request.get_data(as_text=True).strip()
-        print(f'=== TYPING POST: chat={chat_id} user={user} data="{data}"', flush=True)
         is_typing = '1' if data == '1' else '0'
         with open(filepath, 'w') as f:
             f.write(is_typing + '|' + now_msk())
@@ -507,6 +514,7 @@ def typing_status(chat_id, user):
         with open(filepath, 'r') as f:
             return f.read(), 200
 
+# ==================== РЕАКЦИИ ====================
 @app.route('/reaction', methods=['POST'])
 def reaction_toggle():
     data = request.get_json() or {}
@@ -534,6 +542,7 @@ def reaction_toggle():
 def reactions_get(chat_id):
     return jsonify(load_reactions(chat_id)), 200
 
+# ==================== ФАЙЛЫ ====================
 @app.route('/avatar/<login>', methods=['POST'])
 def save_avatar(login):
     data = request.get_json()
@@ -632,6 +641,7 @@ def upload_document():
                     'url': f'https://nemesendger-server.onrender.com/document/{filename}',
                     'name': original_name}), 200
 
+# ==================== АДМИН ====================
 @app.route('/delete_user', methods=['POST'])
 def delete_user():
     data = request.get_json()
