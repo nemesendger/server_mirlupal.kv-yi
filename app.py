@@ -28,8 +28,9 @@ ONLINE_DIR = '/tmp/online'
 TYPING_DIR = '/tmp/typing'
 REACTIONS_DIR = '/tmp/reactions'
 SUPPORT_DIR = '/tmp/support'
+SECURITY_DIR = '/tmp/security'
 
-for d in [AVATARS_DIR, VOICE_DIR, PHOTOS_DIR, VIDEO_DIR, DOCS_DIR, READ_DIR, ONLINE_DIR, TYPING_DIR, REACTIONS_DIR, SUPPORT_DIR]:
+for d in [AVATARS_DIR, VOICE_DIR, PHOTOS_DIR, VIDEO_DIR, DOCS_DIR, READ_DIR, ONLINE_DIR, TYPING_DIR, REACTIONS_DIR, SUPPORT_DIR, SECURITY_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
@@ -88,6 +89,55 @@ def ensure_support_account():
 
 ensure_support_account()
 
+# ==================== ЛОГИРОВАНИЕ ВХОДОВ ====================
+def log_security_event(login, device='', device_id='', platform='', ip=''):
+    """Записывает событие входа в файл безопасности пользователя."""
+    login = login.lower()
+    filepath = os.path.join(SECURITY_DIR, f'{login}.txt')
+    devices_file = os.path.join(SECURITY_DIR, f'{login}_devices.json')
+
+    now = now_msk()
+    time_short = now.split(' ')[1][:5]
+
+    # Проверяем, новое ли устройство
+    known = []
+    if os.path.exists(devices_file):
+        try:
+            with open(devices_file, 'r') as f:
+                known = json.load(f)
+        except Exception:
+            known = []
+
+    is_new = bool(device_id) and (device_id not in known)
+
+    if is_new:
+        known.append(device_id)
+        try:
+            with open(devices_file, 'w') as f:
+                json.dump(known, f)
+        except Exception:
+            pass
+
+    if is_new:
+        title = "🔐 Новый вход в аккаунт"
+    else:
+        title = "🔐 Вход в аккаунт"
+
+    parts = [title]
+    if device:
+        parts.append("📱 " + device)
+    if platform:
+        parts.append("💻 " + platform)
+    if ip:
+        parts.append("🌐 " + ip)
+    parts.append("🕐 " + time_short)
+
+    text = " · ".join(parts)
+    line = "Nemesendger: " + text + "|" + now + "\n"
+
+    with open(filepath, 'a') as f:
+        f.write(line)
+
 # ==================== РЕАКЦИИ ====================
 def reactions_file(chat_id):
     safe = chat_id.replace('/', '_').replace('\\', '_')
@@ -131,6 +181,16 @@ def register():
 
     users[login] = {'password': password, 'displayName': display_name or login}
     save_users(users)
+
+    # Логируем регистрацию
+    device = data.get('device', '')
+    device_id = data.get('device_id', '')
+    platform = data.get('platform', '')
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+    if ip:
+        ip = ip.split(',')[0].strip()
+    log_security_event(login, device, device_id, platform, ip)
+
     return jsonify({'status': 'OK'}), 200
 
 @app.route('/login', methods=['POST'])
@@ -138,6 +198,9 @@ def login():
     data = request.get_json()
     login = data.get('login')
     password = data.get('password')
+    device = data.get('device', '')
+    device_id = data.get('device_id', '')
+    platform = data.get('platform', '')
 
     if not login or not password:
         return jsonify({'error': 'Логин и пароль обязательны'}), 400
@@ -150,10 +213,25 @@ def login():
     if users[login]['password'] != password:
         return jsonify({'error': 'Неверный пароль'}), 401
 
+    # Логируем вход
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+    if ip:
+        ip = ip.split(',')[0].strip()
+    log_security_event(login, device, device_id, platform, ip)
+
     return jsonify({
         'status': 'OK',
         'displayName': users[login].get('displayName', login)
     }), 200
+
+@app.route('/security/<login>', methods=['GET'])
+def get_security(login):
+    filepath = os.path.join(SECURITY_DIR, f'{login.lower()}.txt')
+    if not os.path.exists(filepath):
+        return '', 200
+    with open(filepath, 'r') as f:
+        content = f.read()
+    return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 @app.route('/users', methods=['GET'])
 def get_users():
@@ -502,7 +580,6 @@ def online_status(user):
 def typing_status(chat_id, user):
     filepath = os.path.join(TYPING_DIR, f"{chat_id}_{user}.txt")
     if request.method == 'POST':
-        # Клиент присылает "1" (печатает) или "0" (не печатает)
         data = request.get_data(as_text=True).strip()
         is_typing = '1' if data == '1' else '0'
         with open(filepath, 'w') as f:
