@@ -99,7 +99,6 @@ def log_security_event(login, device='', device_id='', platform='', ip=''):
     now = now_msk()
     time_short = now.split(' ')[1][:5]
 
-    # Проверяем, новое ли устройство
     known = []
     if os.path.exists(devices_file):
         try:
@@ -182,14 +181,16 @@ def register():
     users[login] = {'password': password, 'displayName': display_name or login}
     save_users(users)
 
-    # Логируем регистрацию
     device = data.get('device', '')
     device_id = data.get('device_id', '')
     platform = data.get('platform', '')
     ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
     if ip:
         ip = ip.split(',')[0].strip()
-    log_security_event(login, device, device_id, platform, ip)
+    try:
+        log_security_event(login, device, device_id, platform, ip)
+    except Exception as e:
+        print(f"[SECURITY ERROR] register: {e}")
 
     return jsonify({'status': 'OK'}), 200
 
@@ -213,16 +214,71 @@ def login():
     if users[login]['password'] != password:
         return jsonify({'error': 'Неверный пароль'}), 401
 
-    # Логируем вход
     ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
     if ip:
         ip = ip.split(',')[0].strip()
-    log_security_event(login, device, device_id, platform, ip)
+    try:
+        log_security_event(login, device, device_id, platform, ip)
+    except Exception as e:
+        print(f"[SECURITY ERROR] login: {e}")
 
     return jsonify({
         'status': 'OK',
         'displayName': users[login].get('displayName', login)
     }), 200
+
+# ==================== СМЕНА ПАРОЛЯ ====================
+@app.route('/change_password', methods=['POST'])
+def change_password():
+    data = request.get_json()
+    login = data.get('login')
+    old_password = data.get('old_password')
+    new_password = data.get('new_password')
+
+    if not login or not old_password or not new_password:
+        return jsonify({'error': 'Все поля обязательны'}), 400
+    if len(new_password) < 4:
+        return jsonify({'error': 'Пароль слишком короткий (мин. 4 символа)'}), 400
+
+    users = load_users()
+    if login not in users:
+        return jsonify({'error': 'Пользователь не найден'}), 404
+    if users[login]['password'] != old_password:
+        return jsonify({'error': 'Старый пароль неверный'}), 401
+
+    users[login]['password'] = new_password
+    save_users(users)
+    return jsonify({'status': 'OK'}), 200
+
+# ==================== СБРОС ПАРОЛЯ (ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА) ====================
+@app.route('/force_reset', methods=['POST'])
+def force_reset_password():
+    """
+    Принудительный сброс пароля. Требует secret_key = ADMIN_PASSWORD.
+    Пример запроса:
+    {
+        "login": "my_login",
+        "new_password": "NewPass123",
+        "secret_key": "1230908070605gg"
+    }
+    """
+    data = request.get_json() or {}
+    login = data.get('login')
+    new_password = data.get('new_password')
+    secret_key = data.get('secret_key')
+
+    if secret_key != ADMIN_PASSWORD:
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    if not login or not new_password:
+        return jsonify({'error': 'Нужны login и new_password'}), 400
+
+    users = load_users()
+    if login not in users:
+        return jsonify({'error': 'Пользователь не найден'}), 404
+
+    users[login]['password'] = new_password
+    save_users(users)
+    return jsonify({'status': 'OK', 'message': f'Пароль для {login} изменён'}), 200
 
 @app.route('/security/<login>', methods=['GET'])
 def get_security(login):
